@@ -14,6 +14,7 @@
 
 package ddf.catalog.transformer.csv;
 
+import static ddf.catalog.transformer.csv.CsvMetacardTransformer.COLUMN_ORDER;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 

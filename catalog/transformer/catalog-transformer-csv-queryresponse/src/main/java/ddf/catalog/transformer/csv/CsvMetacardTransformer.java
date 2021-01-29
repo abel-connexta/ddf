@@ -38,6 +38,7 @@ import org.slf4j.LoggerFactory;
 public class CsvMetacardTransformer implements MetacardTransformer {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(CsvMetacardTransformer.class);
+  public static final String COLUMN_ORDER = "columnOrder";
 
   @Override
   public BinaryContent transform(Metacard metacard, Map<String, Serializable> arguments)
