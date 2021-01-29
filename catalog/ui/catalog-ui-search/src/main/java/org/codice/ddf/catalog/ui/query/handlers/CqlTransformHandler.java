@@ -19,6 +19,7 @@ import com.google.gson.GsonBuilder;
 import ddf.catalog.data.Attribute;
 import ddf.catalog.data.AttributeType;
 import ddf.catalog.data.BinaryContent;
+import ddf.catalog.data.Metacard;
 import ddf.catalog.data.Result;
 import ddf.catalog.federation.FederationException;
 import ddf.catalog.operation.QueryResponse;
@@ -38,6 +39,7 @@ import java.io.OutputStream;
 import java.io.Serializable;
 import java.time.Instant;
 import java.util.AbstractMap;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
@@ -270,6 +272,27 @@ public class CqlTransformHandler implements Route {
                             .contains(result.getMetacard().getId()))
                 .collect(Collectors.toList());
 
+    List<String> resultsNotToExport = new ArrayList<>();
+    results =
+        queryResponseTransformer.getProperty("required-attributes") == null
+            ? results
+            : results
+                .stream()
+                .filter(
+                    result -> {
+                      Metacard metacard = result.getMetacard();
+                      for (String attr :
+                          (List<String>)
+                              queryResponseTransformer.getProperty("required-attributes")) {
+                        if (metacard.getAttribute(attr) == null) {
+                          resultsNotToExport.add(metacard.getId());
+                          return false;
+                        }
+                      }
+                      return true;
+                    })
+                .collect(Collectors.toList());
+
     QueryResponse combinedResponse =
         new QueryResponseImpl(
             new QueryRequestImpl(new QueryImpl(ECQL.toFilter(cqlRequests.get(0).getCql()))),
@@ -289,7 +312,41 @@ public class CqlTransformHandler implements Route {
       arguments = cswTransformArgumentsAdapter();
     }
 
-    attachFileToResponse(request, response, queryResponseTransformer, combinedResponse, arguments);
+    String warning = null;
+    if (resultsNotToExport.size() > 0) {
+      List<String> requiredAttr =
+          (List<String>) queryResponseTransformer.getProperty("required-attributes");
+      String idName = Metacard.ID;
+      if (arguments.get("columnAliasMap") != null) {
+        requiredAttr = new ArrayList<>();
+        Map<String, Serializable> columnAliasMap =
+            (Map<String, Serializable>) arguments.get("columnAliasMap");
+        idName = columnAliasMap.get(idName) == null ? idName : (String) columnAliasMap.get(idName);
+        for (String attribute :
+            (List<String>) queryResponseTransformer.getProperty("required-attributes")) {
+          if (StringUtils.isNotBlank((String) columnAliasMap.get(attribute))) {
+            requiredAttr.add((String) columnAliasMap.get(attribute));
+          } else {
+            requiredAttr.add(attribute);
+          }
+        }
+      }
+      if (results.size() == 0) {
+        LOGGER.debug("0 Results to export due to missing required field(s): {}", requiredAttr);
+        response.status(HttpStatus.BAD_REQUEST_400);
+        return ImmutableMap.of(
+            "message", String.format("Result(s) missing required field(s): %s", requiredAttr));
+      }
+      warning =
+          String.format("Following not exported, missing required field(s): %s", requiredAttr);
+      int count = 0;
+      for (String resultId : resultsNotToExport) {
+        warning += String.format("\\n%s) %s: %s", ++count, idName, resultId);
+      }
+    }
+
+    attachFileToResponse(
+        request, response, queryResponseTransformer, combinedResponse, arguments, warning);
 
     return "";
   }
@@ -298,7 +355,8 @@ public class CqlTransformHandler implements Route {
     return queryResponseTransformers;
   }
 
-  private void setHttpHeaders(Request request, Response response, BinaryContent content)
+  private void setHttpHeaders(
+      Request request, Response response, BinaryContent content, String warning)
       throws MimeTypeException {
     String mimeType = content.getMimeTypeValue();
 
@@ -312,6 +370,11 @@ public class CqlTransformHandler implements Route {
     if (containsGzip(request)) {
       LOGGER.trace("Request header accepts gzip");
       response.header(HttpHeaders.CONTENT_ENCODING, GZIP);
+    }
+
+    if (StringUtils.isNotBlank(warning)) {
+      LOGGER.trace("Response has warning: {}", warning);
+      response.header("warning", warning);
     }
 
     response.type(mimeType);
@@ -343,12 +406,13 @@ public class CqlTransformHandler implements Route {
       Response response,
       ServiceReference<QueryResponseTransformer> queryResponseTransformer,
       QueryResponse cqlQueryResponse,
-      Map<String, Serializable> arguments)
+      Map<String, Serializable> arguments,
+      String warning)
       throws CatalogTransformerException, IOException, MimeTypeException {
     BinaryContent content =
         bundleContext.getService(queryResponseTransformer).transform(cqlQueryResponse, arguments);
 
-    setHttpHeaders(request, response, content);
+    setHttpHeaders(request, response, content, warning);
 
     try (OutputStream servletOutputStream = response.raw().getOutputStream();
         InputStream resultStream = content.getInputStream()) {
