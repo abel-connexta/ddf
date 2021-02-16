@@ -26,6 +26,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipEntry;
@@ -109,7 +110,8 @@ public class ZipCompression implements QueryResponseTransformer {
     ServiceReference<MetacardTransformer> serviceRef =
         getTransformerServiceReference(transformerId);
     MetacardTransformer transformer = bundleContext.getService(serviceRef);
-
+    int totalWritten = 0;
+    List<String> notAddedIds = new ArrayList<>();
     String extension = getFileExtensionFromService(serviceRef);
 
     if (StringUtils.isNotBlank(extension)) {
@@ -130,9 +132,23 @@ public class ZipCompression implements QueryResponseTransformer {
           zipOutputStream.putNextEntry(entry);
           zipOutputStream.write(binaryContent.getByteArray());
           zipOutputStream.closeEntry();
+          totalWritten++;
         } else {
+          notAddedIds.add(metacard.getId());
           LOGGER.debug("Metacard with id [{}] was not added to zip file", metacard.getId());
         }
+      }
+      // TODO:: this was the main reason why was not zipping properly, needed to specify finish.
+      // This alone will fix the zip export issue.
+      zipOutputStream.finish();
+      // TODO:: this scenerio occured, if there was an exception when transforming data, and in that
+      // case there was nothing to zip. But it used to zip empty content that caused issue when
+      // trying to unzip.
+      if (totalWritten == 0) {
+        return null;
+      }
+      if (notAddedIds.size() > 0) {
+        arguments.put("failedTransformIds", (Serializable) notAddedIds);
       }
 
       return fileBackedOutputStream.asByteSource().openStream();
