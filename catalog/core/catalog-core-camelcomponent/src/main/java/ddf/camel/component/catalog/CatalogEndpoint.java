@@ -28,7 +28,9 @@ import org.apache.camel.ExchangePattern;
 import org.apache.camel.MultipleConsumersSupport;
 import org.apache.camel.Processor;
 import org.apache.camel.Producer;
+import org.apache.camel.spi.UriParam;
 import org.apache.camel.support.DefaultEndpoint;
+import org.apache.camel.support.SynchronousDelegateProducer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -60,6 +62,12 @@ public class CatalogEndpoint extends DefaultEndpoint implements MultipleConsumer
   private final CatalogFramework catalogFramework;
 
   private final MimeTypeMapper mimeTypeMapper;
+
+  @UriParam(
+      defaultValue = "false",
+      label = "producer,advanced",
+      description = "Sets whether synchronous processing should be strictly used")
+  private boolean synchronous;
 
   /**
    * Constructs a CatalogEndpoint for the specified custom <code>catalog</code> component.
@@ -142,6 +150,11 @@ public class CatalogEndpoint extends DefaultEndpoint implements MultipleConsumer
       throw new IllegalArgumentException(
           "Unable to create producer for context path [" + contextPath + "]");
     }
+
+    if (isSynchronous()) {
+      return new SynchronousDelegateProducer(producer);
+    } // TODO::Not sure if isSynchronous() was intentionally left out or not. Added it to align with
+    // camel examples I saw (e.g. CxfRsEndpoint.java)
 
     return producer;
   }
@@ -230,5 +243,13 @@ public class CatalogEndpoint extends DefaultEndpoint implements MultipleConsumer
   @Override
   public int hashCode() {
     return Objects.hash(super.hashCode(), transformerId, contextPath, mimeType);
+  }
+
+  public boolean isSynchronous() {
+    return synchronous;
+  }
+
+  public void setSynchronous(boolean synchronous) {
+    this.synchronous = synchronous;
   }
 }
